@@ -1,0 +1,44 @@
+{
+  "name": "augment2api-proxy",
+  "version": "1.0.0",
+  "description": "Augment2Api 统一代理 - 完全基于 Cloudflare 部署",
+  "main": "src/worker.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging",
+    "deploy:production": "wrangler deploy --env production",
+    "db:create": "wrangler d1 create augment2api-db",
+    "db:init": "wrangler d1 execute augment2api-db --file=./schema.sql",
+    "db:init:local": "wrangler d1 execute augment2api-db --local --file=./schema.sql",
+    "db:shell": "wrangler d1 execute augment2api-db --command",
+    "logs": "wrangler tail",
+    "test": "node test.js"
+  },
+  "keywords": [
+    "augment",
+    "api",
+    "proxy",
+    "cloudflare",
+    "workers",
+    "d1",
+    "openai",
+    "claude"
+  ],
+  "author": "skymun016",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/skymun016/augment2apicloudflare.git"
+  },
+  "bugs": {
+    "url": "https://github.com/skymun016/augment2apicloudflare/issues"
+  },
+  "homepage": "https://github.com/skymun016/augment2apicloudflare#readme",
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
