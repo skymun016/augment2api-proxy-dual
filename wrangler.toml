@@ -1,5 +1,5 @@
 # Wrangler 配置文件 - 多用户Token池管理系统
-name = "augment2api-proxy-multiuser"
+name = "augment2api-proxy-dual"
 main = "src/worker-multiuser.js"
 compatibility_date = "2024-01-01"
 
