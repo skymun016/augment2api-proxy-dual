@@ -436,7 +436,7 @@ async function handleAdminCreateAllocation(request, env) {
 
     // 检查用户当前分配的Token数量
     const currentAllocations = await env.DB.prepare(`
-      SELECT COUNT(*) as count FROM user_token_allocations
+      SELECT COUNT(*) as count FROM token_allocations
       WHERE user_id = ? AND status = 'active'
     `).bind(user_id).first();
 
@@ -450,17 +450,38 @@ async function handleAdminCreateAllocation(request, env) {
     const allocations = [];
     for (const token_id of token_ids) {
       try {
+        // 检查token是否存在且可用
+        const token = await env.DB.prepare(`
+          SELECT id FROM tokens WHERE id = ? AND status = 'active'
+        `).bind(token_id).first();
+
+        if (!token) {
+          console.warn(`Token ${token_id} not found or inactive`);
+          continue;
+        }
+
+        // 检查是否已经分配
+        const existing = await env.DB.prepare(`
+          SELECT id FROM token_allocations
+          WHERE user_id = ? AND token_id = ? AND status = 'active'
+        `).bind(user_id, token_id).first();
+
+        if (existing) {
+          console.warn(`Token ${token_id} already allocated to user ${user_id}`);
+          continue;
+        }
+
         const result = await env.DB.prepare(`
-          INSERT INTO user_token_allocations (user_id, token_id, priority)
-          VALUES (?, ?, ?)
-        `).bind(user_id, token_id, priority).run();
+          INSERT INTO token_allocations (user_id, token_id, status)
+          VALUES (?, ?, 'active')
+        `).bind(user_id, token_id).run();
 
         if (result.success) {
           allocations.push({
             id: result.meta.last_row_id,
             user_id,
             token_id,
-            priority
+            status: 'active'
           });
         }
       } catch (e) {
@@ -600,62 +621,7 @@ async function handleAdminCreateToken(request, env) {
   }
 }
 
-// 处理管理员创建分配
-async function handleAdminCreateAllocation(request, env) {
-  try {
-    // 验证管理员权限
-    const authResult = await verifyAdminAuth(request, env);
-    if (!authResult.success) {
-      return jsonResponse({ error: authResult.error }, 401);
-    }
 
-    const { user_id, token_id } = await request.json();
-
-    if (!user_id || !token_id) {
-      return jsonResponse({ error: 'Missing user_id or token_id' }, 400);
-    }
-
-    // 检查用户和token是否存在
-    const [user, token] = await Promise.all([
-      env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(user_id).first(),
-      env.DB.prepare('SELECT id FROM tokens WHERE id = ? AND status = "active"').bind(token_id).first()
-    ]);
-
-    if (!user) {
-      return jsonResponse({ error: 'User not found' }, 404);
-    }
-
-    if (!token) {
-      return jsonResponse({ error: 'Token not found or inactive' }, 404);
-    }
-
-    // 检查是否已经分配
-    const existing = await env.DB.prepare(`
-      SELECT id FROM token_allocations
-      WHERE user_id = ? AND token_id = ? AND status = 'active'
-    `).bind(user_id, token_id).first();
-
-    if (existing) {
-      return jsonResponse({ error: 'Token already allocated to this user' }, 400);
-    }
-
-    // 创建分配
-    const result = await env.DB.prepare(`
-      INSERT INTO token_allocations (user_id, token_id, status)
-      VALUES (?, ?, 'active')
-    `).bind(user_id, token_id).run();
-
-    return jsonResponse({
-      status: 'success',
-      allocation_id: result.meta.last_row_id,
-      message: 'Token allocated successfully'
-    });
-
-  } catch (error) {
-    console.error('Error in handleAdminCreateAllocation:', error);
-    return jsonResponse({ error: 'Failed to create allocation' }, 500);
-  }
-}
 
 // 处理管理员创建用户
 async function handleAdminCreateUser(request, env) {
@@ -913,43 +879,6 @@ async function handleChatCompletion(request, env) {
 }
 
 // ============ 辅助函数 ============
-
-// 验证管理员权限
-async function verifyAdminAuth(request, env) {
-  try {
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return { success: false, error: 'Missing or invalid authorization header' };
-    }
-
-    const sessionToken = authHeader.substring(7);
-
-    // 查询会话
-    const session = await env.DB.prepare(`
-      SELECT s.*, a.username, a.role
-      FROM sessions s
-      JOIN admins a ON s.user_id = a.id
-      WHERE s.session_token = ? AND s.user_type = 'admin' AND s.expires_at > CURRENT_TIMESTAMP
-    `).bind(sessionToken).first();
-
-    if (!session) {
-      return { success: false, error: 'Invalid or expired session' };
-    }
-
-    return {
-      success: true,
-      admin: {
-        id: session.user_id,
-        username: session.username,
-        role: session.role
-      }
-    };
-
-  } catch (error) {
-    console.error('Error in verifyAdminAuth:', error);
-    return { success: false, error: 'Authentication failed' };
-  }
-}
 
 // 转发请求到Augment API
 async function forwardToAugment(token, requestBody, env) {
