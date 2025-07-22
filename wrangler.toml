@@ -1,10 +1,23 @@
-# Wrangler 配置文件
-name = "augment2api-proxy"
-main = "src/worker.js"
+# Wrangler 配置文件 - 多用户Token池管理系统
+name = "augment2api-proxy-multiuser"
+main = "src/worker-multiuser.js"
 compatibility_date = "2024-01-01"
 
 # 环境变量
 [vars]
+# 系统配置
+ENVIRONMENT = "development"
+API_VERSION = "v1.0.0"
+DEFAULT_TOKEN_QUOTA = "3"
+MAX_TOKEN_QUOTA = "10"
+SESSION_EXPIRE_HOURS = "24"
+RATE_LIMIT_PER_HOUR = "1000"
+
+# 管理员配置（开发环境）
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "admin123"  # 生产环境中应使用强密码
+
+# 兼容性配置（保留原有功能）
 UNIFIED_TOKEN = "your-unified-token-here"
 ACCESS_PWD = "admin-password-123"
 
