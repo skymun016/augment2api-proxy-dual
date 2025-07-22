@@ -41,7 +41,10 @@ export default {
 
     } catch (initError) {
       console.log('Database initialization check:', initError.message);
-      // 继续执行，不阻断请求
+      // 如果是严重错误，返回友好提示
+      if (initError.message.includes('no such table') || initError.message.includes('database')) {
+        return handleDatabaseNotConfigured(request);
+      }
     }
 
     try {
@@ -646,6 +649,68 @@ async function handleDashboard(request, env) {
 </html>`;
 
   return new Response(html, {
+    headers: { 'Content-Type': 'text/html; charset=utf-8' }
+  });
+}
+
+// 处理数据库未配置的情况
+function handleDatabaseNotConfigured(request) {
+  const html = `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据库配置需要</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 40px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .error { color: #dc3545; margin-bottom: 20px; }
+        .steps { background: #f8f9fa; padding: 20px; border-radius: 4px; margin: 20px 0; }
+        .step { margin: 10px 0; padding: 10px; border-left: 4px solid #007bff; background: white; }
+        code { background: #f1f3f4; padding: 2px 6px; border-radius: 3px; font-family: monospace; }
+        .btn { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; text-decoration: none; display: inline-block; margin: 10px 5px 0 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 数据库配置需要</h1>
+        <div class="error">
+            <strong>错误：</strong>D1数据库未配置或未绑定到Worker
+        </div>
+
+        <h2>📋 配置步骤</h2>
+        <div class="steps">
+            <div class="step">
+                <strong>1. 创建D1数据库</strong><br>
+                在Cloudflare Dashboard中创建名为 <code>augment2api-multiuser</code> 的D1数据库
+            </div>
+            <div class="step">
+                <strong>2. 绑定数据库</strong><br>
+                在Worker设置中添加D1绑定：变量名 <code>DB</code>，选择刚创建的数据库
+            </div>
+            <div class="step">
+                <strong>3. 初始化表结构</strong><br>
+                在D1控制台中执行 <code>schema-extended.sql</code> 文件的内容
+            </div>
+            <div class="step">
+                <strong>4. 重新部署</strong><br>
+                保存配置后Worker会自动重新部署
+            </div>
+        </div>
+
+        <h2>🚀 快速链接</h2>
+        <a href="https://dash.cloudflare.com/" class="btn" target="_blank">Cloudflare Dashboard</a>
+        <a href="https://github.com/skymun016/augment2api-proxy-dual" class="btn" target="_blank">GitHub仓库</a>
+
+        <h2>📞 需要帮助？</h2>
+        <p>查看详细的配置文档：<a href="https://github.com/skymun016/augment2api-proxy-dual/blob/main/MULTIUSER_SYSTEM_GUIDE.md">多用户系统指南</a></p>
+    </div>
+</body>
+</html>`;
+
+  return new Response(html, {
+    status: 503,
     headers: { 'Content-Type': 'text/html; charset=utf-8' }
   });
 }

@@ -21,11 +21,11 @@ ADMIN_PASSWORD = "admin123"  # 生产环境中应使用强密码
 UNIFIED_TOKEN = "your-unified-token-here"
 ACCESS_PWD = "admin-password-123"
 
-# D1 数据库绑定 - 部署后需要手动绑定
-# [[d1_databases]]
-# binding = "DB"
-# database_name = "augment2api-multiuser"
-# database_id = ""
+# D1 数据库绑定
+[[d1_databases]]
+binding = "DB"
+database_name = "augment2api-multiuser"
+database_id = "PLACEHOLDER_DATABASE_ID"
 
 # 生产环境配置
 [env.production]
