@@ -63,6 +63,10 @@ export default {
       else if (path === '/api/user/info') {
         return handleUserInfo(request, env);
       }
+      // 插件兼容性API - Token池
+      else if (path === '/api/tokens' && method === 'GET') {
+        return handlePluginTokens(request, env);
+      }
       else if (path === '/api/tokens' && method === 'GET') {
         return handleGetUserTokens(request, env);
       }
@@ -145,8 +149,16 @@ export default {
 // 处理用户信息查询（插件兼容）
 async function handleUserInfo(request, env) {
   const url = new URL(request.url);
-  const personalToken = url.searchParams.get('token');
-  
+  let personalToken = url.searchParams.get('token');
+
+  // 如果查询参数中没有token，尝试从Authorization头获取
+  if (!personalToken) {
+    const authHeader = request.headers.get('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      personalToken = authHeader.substring(7);
+    }
+  }
+
   if (!personalToken) {
     return jsonResponse({ error: 'Missing personal token' }, 400);
   }
@@ -226,6 +238,52 @@ async function handleGetUserTokens(request, env) {
   } catch (error) {
     console.error('Error in handleGetUserTokens:', error);
     return jsonResponse({ error: 'Failed to get user tokens' }, 500);
+  }
+}
+
+// 处理插件Token池API（插件兼容性）
+async function handlePluginTokens(request, env) {
+  const authHeader = request.headers.get('Authorization');
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return jsonResponse({ error: 'Missing or invalid authorization header' }, 401);
+  }
+
+  const personalToken = authHeader.substring(7);
+
+  try {
+    const user = await getUserByPersonalToken(env.DB, personalToken);
+    if (!user) {
+      return jsonResponse({ error: 'Invalid personal token' }, 401);
+    }
+
+    // 获取用户可用的Token列表
+    const availableTokens = await getAvailableTokensForUser(env.DB, user.id);
+
+    // 转换为插件期望的格式
+    const tokenList = availableTokens.map(token => ({
+      token: token.token_value, // 插件期望的实际token值
+      usage_count: token.usage_count || 0,
+      last_used: token.last_used_at,
+      status: 'active'
+    }));
+
+    // 记录用户活动
+    await logUserActivity(env.DB, user.id, 'plugin_get_tokens', {
+      ip: request.headers.get('CF-Connecting-IP'),
+      userAgent: request.headers.get('User-Agent'),
+      token_count: tokenList.length
+    });
+
+    return jsonResponse({
+      status: 'success',
+      tokens: tokenList,
+      total_count: tokenList.length
+    });
+
+  } catch (error) {
+    console.error('Error in handlePluginTokens:', error);
+    return jsonResponse({ error: 'Failed to get tokens' }, 500);
   }
 }
 
@@ -619,23 +677,37 @@ async function handleAdminCreateToken(request, env) {
       return jsonResponse({ error: 'Invalid token format. Must be 64-character hex string.' }, 400);
     }
 
-    // 检查token是否已存在
-    const existing = await env.DB.prepare(`
-      SELECT id FROM tokens WHERE token_hash = ?
-    `).bind(await generateHash(token)).first();
-
-    if (existing) {
-      return jsonResponse({ error: 'Token already exists' }, 400);
-    }
-
-    // 创建token
+    // 生成token哈希
     const tokenHash = await generateHash(token);
     const tokenPrefix = token.substring(0, 8) + '...';
 
-    const result = await env.DB.prepare(`
-      INSERT INTO tokens (name, token_hash, token_prefix, status)
-      VALUES (?, ?, ?, 'active')
-    `).bind(name, tokenHash, tokenPrefix).run();
+    // 检查token是否已存在（如果表存在的话）
+    try {
+      const existing = await env.DB.prepare(`
+        SELECT id FROM tokens WHERE token_hash = ?
+      `).bind(tokenHash).first();
+
+      if (existing) {
+        return jsonResponse({ error: 'Token already exists' }, 400);
+      }
+    } catch (dbError) {
+      console.log('Tokens table may not exist, will try to create token anyway');
+    }
+
+    // 创建token
+    let result;
+    try {
+      result = await env.DB.prepare(`
+        INSERT INTO tokens (name, token_hash, token_prefix, status)
+        VALUES (?, ?, ?, 'active')
+      `).bind(name, tokenHash, tokenPrefix).run();
+    } catch (dbError) {
+      console.error('Failed to insert token, table may not exist:', dbError.message);
+      return jsonResponse({
+        error: 'Database table not found. Please initialize the database first.',
+        details: dbError.message
+      }, 500);
+    }
 
     return jsonResponse({
       status: 'success',
