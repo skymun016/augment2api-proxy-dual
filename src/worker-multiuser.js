@@ -1727,6 +1727,258 @@ async function handleAdminPanel(request, env) {
             });
         }
 
+        // 创建Token模态框
+        function showCreateTokenModal() {
+            const content = \`
+                <h3>添加新Token</h3>
+                <form id="createTokenForm">
+                    <div class="form-group">
+                        <label>Token名称</label>
+                        <input type="text" name="name" required placeholder="例如：Token-001">
+                    </div>
+                    <div class="form-group">
+                        <label>Augment Token</label>
+                        <input type="text" name="token" required placeholder="64位十六进制字符串" maxlength="64">
+                        <small style="color: #666;">请输入完整的64位Augment Token</small>
+                    </div>
+                    <button type="submit" class="btn btn-primary">添加Token</button>
+                </form>
+            \`;
+            showModal(content);
+
+            document.getElementById('createTokenForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                const tokenData = Object.fromEntries(formData);
+
+                try {
+                    const result = await apiRequest('/api/admin/tokens', {
+                        method: 'POST',
+                        body: JSON.stringify(tokenData)
+                    });
+
+                    if (result.status === 'success') {
+                        closeModal();
+                        loadTokens();
+                        alert('Token添加成功');
+                    } else {
+                        alert('添加失败: ' + result.error);
+                    }
+                } catch (error) {
+                    alert('添加失败: ' + error.message);
+                }
+            });
+        }
+
+        // 创建批量分配模态框
+        function showCreateAllocationModal() {
+            const content = \`
+                <h3>批量分配Token</h3>
+                <form id="createAllocationForm">
+                    <div class="form-group">
+                        <label>选择用户</label>
+                        <select name="user_id" id="userSelect" required>
+                            <option value="">请选择用户</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>选择Token（可多选）</label>
+                        <div id="tokenCheckboxes" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 4px;">
+                            <div class="loading">加载中...</div>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">批量分配</button>
+                </form>
+            \`;
+            showModal(content);
+
+            // 加载用户列表
+            loadUsersForSelect();
+            // 加载Token列表
+            loadTokensForSelect();
+
+            document.getElementById('createAllocationForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                const user_id = formData.get('user_id');
+
+                // 获取选中的Token IDs
+                const selectedTokens = Array.from(document.querySelectorAll('input[name="token_ids"]:checked'))
+                    .map(cb => parseInt(cb.value));
+
+                if (!user_id || selectedTokens.length === 0) {
+                    alert('请选择用户和至少一个Token');
+                    return;
+                }
+
+                try {
+                    const result = await apiRequest('/api/admin/allocations', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            user_id: parseInt(user_id),
+                            token_ids: selectedTokens
+                        })
+                    });
+
+                    if (result.status === 'success') {
+                        closeModal();
+                        loadAllocations();
+                        alert(\`成功分配 \${result.allocations.length} 个Token\`);
+                    } else {
+                        alert('分配失败: ' + result.error);
+                    }
+                } catch (error) {
+                    alert('分配失败: ' + error.message);
+                }
+            });
+        }
+
+        // 加载用户列表到下拉框
+        async function loadUsersForSelect() {
+            try {
+                const users = await apiRequest('/api/admin/users');
+                const select = document.getElementById('userSelect');
+                select.innerHTML = '<option value="">请选择用户</option>';
+
+                if (users.users) {
+                    users.users.forEach(user => {
+                        const option = document.createElement('option');
+                        option.value = user.id;
+                        option.textContent = \`\${user.username} (\${user.email})\`;
+                        select.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('加载用户列表失败:', error);
+            }
+        }
+
+        // 加载Token列表到复选框
+        async function loadTokensForSelect() {
+            try {
+                const tokens = await apiRequest('/api/admin/tokens');
+                const container = document.getElementById('tokenCheckboxes');
+                container.innerHTML = '';
+
+                if (tokens.tokens && tokens.tokens.length > 0) {
+                    tokens.tokens.forEach(token => {
+                        const div = document.createElement('div');
+                        div.style.marginBottom = '8px';
+                        div.innerHTML = \`
+                            <label style="display: flex; align-items: center; cursor: pointer;">
+                                <input type="checkbox" name="token_ids" value="\${token.id}" style="margin-right: 8px;">
+                                <span>\${token.name} (\${token.token_prefix})</span>
+                            </label>
+                        \`;
+                        container.appendChild(div);
+                    });
+                } else {
+                    container.innerHTML = '<p style="color: #666;">暂无可用Token</p>';
+                }
+            } catch (error) {
+                console.error('加载Token列表失败:', error);
+                document.getElementById('tokenCheckboxes').innerHTML = '<p style="color: #c33;">加载失败</p>';
+            }
+        }
+
+        // 加载Token列表
+        async function loadTokens() {
+            try {
+                const tokens = await apiRequest('/api/admin/tokens');
+                const tableHtml = \`
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>名称</th>
+                                <th>Token前缀</th>
+                                <th>状态</th>
+                                <th>创建时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            \${tokens.tokens ? tokens.tokens.map(token => \`
+                                <tr>
+                                    <td>\${token.id}</td>
+                                    <td>\${token.name}</td>
+                                    <td>\${token.token_prefix}</td>
+                                    <td>\${token.status}</td>
+                                    <td>\${new Date(token.created_at).toLocaleString()}</td>
+                                    <td>
+                                        <button class="btn btn-secondary" onclick="editToken(\${token.id})">编辑</button>
+                                    </td>
+                                </tr>
+                            \`).join('') : '<tr><td colspan="6">暂无数据</td></tr>'}
+                        </tbody>
+                    </table>
+                \`;
+                document.getElementById('tokensTable').innerHTML = tableHtml;
+            } catch (error) {
+                document.getElementById('tokensTable').innerHTML = '<div class="error">加载Token列表失败</div>';
+            }
+        }
+
+        // 加载分配列表
+        async function loadAllocations() {
+            try {
+                const allocations = await apiRequest('/api/admin/allocations');
+                const tableHtml = \`
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>用户</th>
+                                <th>Token</th>
+                                <th>状态</th>
+                                <th>分配时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            \${allocations.allocations ? allocations.allocations.map(allocation => \`
+                                <tr>
+                                    <td>\${allocation.id}</td>
+                                    <td>\${allocation.username} (\${allocation.email})</td>
+                                    <td>\${allocation.token_name} (\${allocation.token_prefix})</td>
+                                    <td>\${allocation.status}</td>
+                                    <td>\${new Date(allocation.created_at).toLocaleString()}</td>
+                                    <td>
+                                        <button class="btn btn-danger" onclick="deleteAllocation(\${allocation.id})">删除</button>
+                                    </td>
+                                </tr>
+                            \`).join('') : '<tr><td colspan="6">暂无数据</td></tr>'}
+                        </tbody>
+                    </table>
+                \`;
+                document.getElementById('allocationsTable').innerHTML = tableHtml;
+            } catch (error) {
+                document.getElementById('allocationsTable').innerHTML = '<div class="error">加载分配列表失败</div>';
+            }
+        }
+
+        // 删除分配
+        async function deleteAllocation(allocationId) {
+            if (!confirm('确定要删除这个分配吗？')) {
+                return;
+            }
+
+            try {
+                const result = await apiRequest(\`/api/admin/allocations/\${allocationId}\`, {
+                    method: 'DELETE'
+                });
+
+                if (result.status === 'success') {
+                    loadAllocations();
+                    alert('分配删除成功');
+                } else {
+                    alert('删除失败: ' + result.error);
+                }
+            } catch (error) {
+                alert('删除失败: ' + error.message);
+            }
+        }
+
         // 页面加载时初始化
         document.addEventListener('DOMContentLoaded', () => {
             loadDashboard();
