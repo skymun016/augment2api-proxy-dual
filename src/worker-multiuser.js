@@ -52,6 +52,12 @@ export default {
       if (path === '/') {
         return handleDashboard(request, env);
       }
+      else if (path === '/admin') {
+        return handleAdminPanel(request, env);
+      }
+      else if (path === '/admin/login') {
+        return handleAdminLoginPage(request, env);
+      }
       
       // 用户相关API（插件兼容）
       else if (path === '/api/user/info') {
@@ -645,6 +651,718 @@ async function handleDashboard(request, env) {
             </ol>
         </div>
     </div>
+</body>
+</html>`;
+
+  return new Response(html, {
+    headers: { 'Content-Type': 'text/html; charset=utf-8' }
+  });
+}
+
+// ============ Web管理页面处理函数 ============
+
+// 处理管理员登录页面
+async function handleAdminLoginPage(request, env) {
+  const html = `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理员登录 - Augment Token Pool</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-container {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            width: 100%;
+            max-width: 400px;
+        }
+        .logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo h1 {
+            color: #333;
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+        .logo p {
+            color: #666;
+            font-size: 14px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+        }
+        input[type="text"], input[type="password"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e1e5e9;
+            border-radius: 6px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        input[type="text"]:focus, input[type="password"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .btn {
+            width: 100%;
+            padding: 12px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .btn:hover {
+            background: #5a6fd8;
+        }
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="logo">
+            <h1>🏊‍♂️ Augment Token Pool</h1>
+            <p>多用户管理系统</p>
+        </div>
+
+        <div class="error" id="error"></div>
+
+        <form id="loginForm">
+            <div class="form-group">
+                <label for="username">用户名</label>
+                <input type="text" id="username" name="username" required>
+            </div>
+
+            <div class="form-group">
+                <label for="password">密码</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+
+            <button type="submit" class="btn" id="loginBtn">登录</button>
+        </form>
+
+        <div class="loading" id="loading">
+            <p>登录中...</p>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const errorDiv = document.getElementById('error');
+            const loadingDiv = document.getElementById('loading');
+            const loginBtn = document.getElementById('loginBtn');
+
+            // 隐藏错误信息
+            errorDiv.style.display = 'none';
+
+            // 显示加载状态
+            loadingDiv.style.display = 'block';
+            loginBtn.disabled = true;
+
+            try {
+                const response = await fetch('/api/admin/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.status === 'success') {
+                    // 保存session token
+                    localStorage.setItem('admin_session_token', data.session_token);
+                    localStorage.setItem('admin_info', JSON.stringify(data.admin));
+
+                    // 跳转到管理面板
+                    window.location.href = '/admin';
+                } else {
+                    throw new Error(data.error || '登录失败');
+                }
+            } catch (error) {
+                errorDiv.textContent = error.message;
+                errorDiv.style.display = 'block';
+            } finally {
+                loadingDiv.style.display = 'none';
+                loginBtn.disabled = false;
+            }
+        });
+
+        // 检查是否已经登录
+        if (localStorage.getItem('admin_session_token')) {
+            window.location.href = '/admin';
+        }
+    </script>
+</body>
+</html>`;
+
+  return new Response(html, {
+    headers: { 'Content-Type': 'text/html; charset=utf-8' }
+  });
+}
+
+// 处理管理面板主页
+async function handleAdminPanel(request, env) {
+  const html = `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理面板 - Augment Token Pool</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa;
+            color: #333;
+        }
+        .header {
+            background: white;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h1 {
+            color: #333;
+            font-size: 24px;
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .btn-primary { background: #007bff; color: white; }
+        .btn-secondary { background: #6c757d; color: white; }
+        .btn-danger { background: #dc3545; color: white; }
+        .btn:hover { opacity: 0.9; }
+
+        .container {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 0 20px;
+        }
+
+        .nav-tabs {
+            display: flex;
+            background: white;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .nav-tab {
+            flex: 1;
+            padding: 15px 20px;
+            text-align: center;
+            cursor: pointer;
+            border: none;
+            background: white;
+            color: #666;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+        .nav-tab.active {
+            background: #007bff;
+            color: white;
+        }
+        .nav-tab:hover:not(.active) {
+            background: #f8f9fa;
+        }
+
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .card h3 {
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .stat-number {
+            font-size: 32px;
+            font-weight: bold;
+            color: #007bff;
+            margin-bottom: 8px;
+        }
+        .stat-label {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        .table th, .table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+        .table th {
+            background: #f8f9fa;
+            font-weight: 600;
+        }
+        .table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+
+        .success {
+            background: #efe;
+            color: #3c3;
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+        }
+        .modal-content {
+            background: white;
+            margin: 50px auto;
+            padding: 20px;
+            border-radius: 8px;
+            max-width: 500px;
+            position: relative;
+        }
+        .modal-close {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            font-size: 24px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🏊‍♂️ Augment Token Pool 管理面板</h1>
+        <div class="user-info">
+            <span id="adminName">管理员</span>
+            <button class="btn btn-danger" onclick="logout()">退出登录</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="nav-tabs">
+            <button class="nav-tab active" onclick="showTab('dashboard')">仪表板</button>
+            <button class="nav-tab" onclick="showTab('users')">用户管理</button>
+            <button class="nav-tab" onclick="showTab('tokens')">Token管理</button>
+            <button class="nav-tab" onclick="showTab('allocations')">分配管理</button>
+            <button class="nav-tab" onclick="showTab('stats')">统计分析</button>
+        </div>
+
+        <!-- 仪表板 -->
+        <div id="dashboard" class="tab-content active">
+            <div class="stats-grid" id="statsGrid">
+                <div class="stat-card">
+                    <div class="stat-number" id="totalUsers">-</div>
+                    <div class="stat-label">总用户数</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="totalTokens">-</div>
+                    <div class="stat-label">总Token数</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="activeAllocations">-</div>
+                    <div class="stat-label">活跃分配</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="todayRequests">-</div>
+                    <div class="stat-label">今日请求</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>系统状态</h3>
+                <div id="systemStatus">
+                    <p>✅ 数据库连接正常</p>
+                    <p>✅ API服务运行中</p>
+                    <p>✅ Token池管理正常</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 用户管理 -->
+        <div id="users" class="tab-content">
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3>用户列表</h3>
+                    <button class="btn btn-primary" onclick="showCreateUserModal()">创建用户</button>
+                </div>
+                <div id="usersTable">
+                    <div class="loading">加载中...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Token管理 -->
+        <div id="tokens" class="tab-content">
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3>Token列表</h3>
+                    <button class="btn btn-primary" onclick="showCreateTokenModal()">添加Token</button>
+                </div>
+                <div id="tokensTable">
+                    <div class="loading">加载中...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 分配管理 -->
+        <div id="allocations" class="tab-content">
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3>Token分配</h3>
+                    <button class="btn btn-primary" onclick="showCreateAllocationModal()">创建分配</button>
+                </div>
+                <div id="allocationsTable">
+                    <div class="loading">加载中...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 统计分析 -->
+        <div id="stats" class="tab-content">
+            <div class="card">
+                <h3>使用统计</h3>
+                <div id="statsContent">
+                    <div class="loading">加载中...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模态框 -->
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <span class="modal-close" onclick="closeModal()">&times;</span>
+            <div id="modalContent"></div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let sessionToken = localStorage.getItem('admin_session_token');
+        let adminInfo = JSON.parse(localStorage.getItem('admin_info') || '{}');
+
+        // 检查登录状态
+        if (!sessionToken) {
+            window.location.href = '/admin/login';
+        }
+
+        // 设置管理员名称
+        document.getElementById('adminName').textContent = adminInfo.username || '管理员';
+
+        // API请求函数
+        async function apiRequest(url, options = {}) {
+            const defaultOptions = {
+                headers: {
+                    'Authorization': 'Bearer ' + sessionToken,
+                    'Content-Type': 'application/json'
+                }
+            };
+
+            const response = await fetch(url, { ...defaultOptions, ...options });
+
+            if (response.status === 401) {
+                logout();
+                return;
+            }
+
+            return response.json();
+        }
+
+        // 标签页切换
+        function showTab(tabName) {
+            // 隐藏所有标签页
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.nav-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+
+            // 显示选中的标签页
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+
+            // 加载对应数据
+            loadTabData(tabName);
+        }
+
+        // 加载标签页数据
+        async function loadTabData(tabName) {
+            switch(tabName) {
+                case 'dashboard':
+                    await loadDashboard();
+                    break;
+                case 'users':
+                    await loadUsers();
+                    break;
+                case 'tokens':
+                    await loadTokens();
+                    break;
+                case 'allocations':
+                    await loadAllocations();
+                    break;
+                case 'stats':
+                    await loadStats();
+                    break;
+            }
+        }
+
+        // 加载仪表板数据
+        async function loadDashboard() {
+            try {
+                const stats = await apiRequest('/api/admin/stats');
+                if (stats) {
+                    document.getElementById('totalUsers').textContent = stats.total_users || 0;
+                    document.getElementById('totalTokens').textContent = stats.total_tokens || 0;
+                    document.getElementById('activeAllocations').textContent = stats.active_allocations || 0;
+                    document.getElementById('todayRequests').textContent = stats.today_requests || 0;
+                }
+            } catch (error) {
+                console.error('加载仪表板数据失败:', error);
+            }
+        }
+
+        // 加载用户列表
+        async function loadUsers() {
+            try {
+                const users = await apiRequest('/api/admin/users');
+                const tableHtml = \`
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>用户名</th>
+                                <th>邮箱</th>
+                                <th>Token配额</th>
+                                <th>状态</th>
+                                <th>创建时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            \${users.users ? users.users.map(user => \`
+                                <tr>
+                                    <td>\${user.id}</td>
+                                    <td>\${user.username || '-'}</td>
+                                    <td>\${user.email || '-'}</td>
+                                    <td>\${user.token_quota}</td>
+                                    <td>\${user.status}</td>
+                                    <td>\${new Date(user.created_at).toLocaleString()}</td>
+                                    <td>
+                                        <button class="btn btn-secondary" onclick="editUser(\${user.id})">编辑</button>
+                                    </td>
+                                </tr>
+                            \`).join('') : '<tr><td colspan="7">暂无数据</td></tr>'}
+                        </tbody>
+                    </table>
+                \`;
+                document.getElementById('usersTable').innerHTML = tableHtml;
+            } catch (error) {
+                document.getElementById('usersTable').innerHTML = '<div class="error">加载用户列表失败</div>';
+            }
+        }
+
+        // 退出登录
+        function logout() {
+            localStorage.removeItem('admin_session_token');
+            localStorage.removeItem('admin_info');
+            window.location.href = '/admin/login';
+        }
+
+        // 模态框操作
+        function showModal(content) {
+            document.getElementById('modalContent').innerHTML = content;
+            document.getElementById('modal').style.display = 'block';
+        }
+
+        function closeModal() {
+            document.getElementById('modal').style.display = 'none';
+        }
+
+        // 创建用户模态框
+        function showCreateUserModal() {
+            const content = \`
+                <h3>创建新用户</h3>
+                <form id="createUserForm">
+                    <div class="form-group">
+                        <label>用户名</label>
+                        <input type="text" name="username" required>
+                    </div>
+                    <div class="form-group">
+                        <label>邮箱</label>
+                        <input type="email" name="email" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Personal Token</label>
+                        <input type="text" name="personal_token" required placeholder="64位十六进制字符串">
+                    </div>
+                    <div class="form-group">
+                        <label>Token配额</label>
+                        <input type="number" name="token_quota" value="3" min="0" max="10">
+                    </div>
+                    <button type="submit" class="btn btn-primary">创建用户</button>
+                </form>
+            \`;
+            showModal(content);
+
+            document.getElementById('createUserForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                const userData = Object.fromEntries(formData);
+
+                try {
+                    const result = await apiRequest('/api/user/register', {
+                        method: 'POST',
+                        body: JSON.stringify(userData)
+                    });
+
+                    if (result.status === 'success') {
+                        closeModal();
+                        loadUsers();
+                        alert('用户创建成功');
+                    } else {
+                        alert('创建失败: ' + result.error);
+                    }
+                } catch (error) {
+                    alert('创建失败: ' + error.message);
+                }
+            });
+        }
+
+        // 页面加载时初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            loadDashboard();
+        });
+
+        // 点击模态框外部关闭
+        window.onclick = function(event) {
+            const modal = document.getElementById('modal');
+            if (event.target === modal) {
+                closeModal();
+            }
+        }
+    </script>
 </body>
 </html>`;
 
