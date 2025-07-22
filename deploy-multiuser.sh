@@ -99,13 +99,20 @@ create_database() {
         log_success "数据库创建成功，ID: $DB_ID"
     fi
     
-    # 更新 wrangler.toml 中的数据库 ID
+    # 启用并更新 wrangler.toml 中的数据库配置
+    log_info "更新数据库配置..."
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS
-        sed -i '' "s/database_id = \".*\"/database_id = \"$DB_ID\"/" wrangler.toml
+        # macOS - 取消注释并更新database_id
+        sed -i '' 's/^# \[\[d1_databases\]\]/[[d1_databases]]/' wrangler.toml
+        sed -i '' 's/^# binding = "DB"/binding = "DB"/' wrangler.toml
+        sed -i '' 's/^# database_name = "augment2api-multiuser"/database_name = "augment2api-multiuser"/' wrangler.toml
+        sed -i '' "s/^# database_id = \"\"/database_id = \"$DB_ID\"/" wrangler.toml
     else
-        # Linux
-        sed -i "s/database_id = \".*\"/database_id = \"$DB_ID\"/" wrangler.toml
+        # Linux - 取消注释并更新database_id
+        sed -i 's/^# \[\[d1_databases\]\]/[[d1_databases]]/' wrangler.toml
+        sed -i 's/^# binding = "DB"/binding = "DB"/' wrangler.toml
+        sed -i 's/^# database_name = "augment2api-multiuser"/database_name = "augment2api-multiuser"/' wrangler.toml
+        sed -i "s/^# database_id = \"\"/database_id = \"$DB_ID\"/" wrangler.toml
     fi
     
     log_success "数据库配置更新完成"

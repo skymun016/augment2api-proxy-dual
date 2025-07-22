@@ -30,6 +30,11 @@ export default {
       return handleCORS();
     }
 
+    // 检查数据库连接
+    if (!env.DB) {
+      return handleDatabaseNotConfigured(request);
+    }
+
     try {
       // 自动初始化数据库
       await initializeDatabase(env.DB);
