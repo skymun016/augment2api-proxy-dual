@@ -31,6 +31,15 @@ export default {
     }
 
     try {
+      // 自动初始化数据库
+      await initializeDatabase(env.DB);
+
+    } catch (initError) {
+      console.log('Database initialization check:', initError.message);
+      // 继续执行，不阻断请求
+    }
+
+    try {
       // 路由分发
       if (path === '/') {
         return handleDashboard(request, env);
@@ -634,4 +643,186 @@ async function handleDashboard(request, env) {
   return new Response(html, {
     headers: { 'Content-Type': 'text/html; charset=utf-8' }
   });
+}
+
+// ============ 数据库初始化函数 ============
+
+// 数据库初始化标志
+let databaseInitialized = false;
+
+/**
+ * 自动初始化数据库表结构
+ * @param {Object} db - D1数据库实例
+ */
+async function initializeDatabase(db) {
+  // 如果已经初始化过，跳过
+  if (databaseInitialized) {
+    return;
+  }
+
+  try {
+    // 检查是否已有表结构
+    const tableCheck = await db.prepare(`
+      SELECT name FROM sqlite_master WHERE type='table' AND name='users'
+    `).first();
+
+    if (tableCheck) {
+      databaseInitialized = true;
+      return;
+    }
+
+    console.log('Initializing database schema...');
+
+    // 创建所有必要的表
+    await createDatabaseTables(db);
+
+    // 插入默认数据
+    await insertDefaultData(db);
+
+    databaseInitialized = true;
+    console.log('Database initialization completed successfully');
+
+  } catch (error) {
+    console.error('Database initialization failed:', error);
+    throw error;
+  }
+}
+
+/**
+ * 创建数据库表结构
+ * @param {Object} db - D1数据库实例
+ */
+async function createDatabaseTables(db) {
+  const tables = [
+    // 保留原有的tokens表
+    `CREATE TABLE IF NOT EXISTS tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      token TEXT NOT NULL UNIQUE,
+      tenant_url TEXT NOT NULL,
+      status TEXT DEFAULT 'active' CHECK (status IN ('active', 'disabled', 'maintenance')),
+      remark TEXT DEFAULT '',
+      usage_count INTEGER DEFAULT 0,
+      last_used_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+
+    // 创建用户表
+    `CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      personal_token TEXT NOT NULL UNIQUE,
+      username TEXT,
+      email TEXT,
+      status TEXT DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'disabled')),
+      token_quota INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_login_at DATETIME
+    )`,
+
+    // 创建用户Token分配表
+    `CREATE TABLE IF NOT EXISTS user_token_allocations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      token_id INTEGER NOT NULL,
+      allocated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      status TEXT DEFAULT 'active' CHECK (status IN ('active', 'revoked')),
+      priority INTEGER DEFAULT 1,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (token_id) REFERENCES tokens(id) ON DELETE CASCADE,
+      UNIQUE(user_id, token_id)
+    )`,
+
+    // 创建用户使用统计表
+    `CREATE TABLE IF NOT EXISTS user_usage_stats (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      token_id INTEGER NOT NULL,
+      date DATE DEFAULT (date('now')),
+      request_count INTEGER DEFAULT 0,
+      success_count INTEGER DEFAULT 0,
+      error_count INTEGER DEFAULT 0,
+      total_tokens_used INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (token_id) REFERENCES tokens(id) ON DELETE CASCADE,
+      UNIQUE(user_id, token_id, date)
+    )`,
+
+    // 创建管理员表
+    `CREATE TABLE IF NOT EXISTS admins (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      email TEXT,
+      role TEXT DEFAULT 'admin' CHECK (role IN ('super_admin', 'admin', 'viewer')),
+      status TEXT DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_login_at DATETIME
+    )`,
+
+    // 保留原有的sessions表
+    `CREATE TABLE IF NOT EXISTS sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_token TEXT NOT NULL UNIQUE,
+      user_type TEXT DEFAULT 'admin' CHECK (user_type IN ('admin', 'user')),
+      user_id INTEGER,
+      expires_at DATETIME NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+
+    // 创建用户操作日志表
+    `CREATE TABLE IF NOT EXISTS user_activity_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER,
+      action TEXT NOT NULL,
+      details TEXT,
+      ip_address TEXT,
+      user_agent TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+    )`,
+
+    // 创建系统配置表
+    `CREATE TABLE IF NOT EXISTS system_config (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      config_key TEXT NOT NULL UNIQUE,
+      config_value TEXT NOT NULL,
+      description TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`
+  ];
+
+  // 执行所有表创建语句
+  for (const sql of tables) {
+    await db.prepare(sql).run();
+  }
+}
+
+/**
+ * 插入默认数据
+ * @param {Object} db - D1数据库实例
+ */
+async function insertDefaultData(db) {
+  // 插入默认管理员账号（密码：admin123）
+  await db.prepare(`
+    INSERT OR IGNORE INTO admins (username, password_hash, email, role)
+    VALUES ('admin', 'ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f', 'admin@example.com', 'super_admin')
+  `).run();
+
+  // 插入默认系统配置
+  const configs = [
+    ['default_token_quota', '3', '新用户默认Token配额'],
+    ['max_token_quota', '10', '单用户最大Token配额'],
+    ['token_rotation_enabled', 'true', '是否启用Token轮换'],
+    ['usage_stats_retention_days', '90', '使用统计保留天数']
+  ];
+
+  for (const [key, value, description] of configs) {
+    await db.prepare(`
+      INSERT OR IGNORE INTO system_config (config_key, config_value, description)
+      VALUES (?, ?, ?)
+    `).bind(key, value, description).run();
+  }
 }
