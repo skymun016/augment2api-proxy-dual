@@ -278,11 +278,47 @@ async function handleAdminLogin(request, env) {
     }
 
     // 查询管理员
-    const admin = await env.DB.prepare(`
+    let admin = await env.DB.prepare(`
       SELECT * FROM admins WHERE username = ? AND status = 'active'
     `).bind(username).first();
 
-    if (!admin || !await verifyHash(password, admin.password_hash)) {
+    console.log('Admin found:', admin ? 'Yes' : 'No');
+
+    if (!admin) {
+      // 如果没有找到管理员，尝试创建默认管理员
+      if (username === 'admin' && password === 'admin123') {
+        try {
+          const defaultPasswordHash = 'ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f';
+          await env.DB.prepare(`
+            INSERT OR IGNORE INTO admins (username, password_hash, email, role, status)
+            VALUES (?, ?, ?, ?, ?)
+          `).bind('admin', defaultPasswordHash, 'admin@example.com', 'super_admin', 'active').run();
+
+          // 重新查询管理员
+          const newAdmin = await env.DB.prepare(`
+            SELECT * FROM admins WHERE username = ? AND status = 'active'
+          `).bind(username).first();
+
+          if (newAdmin) {
+            console.log('Default admin created successfully');
+            admin = newAdmin; // 设置admin变量以继续登录流程
+          } else {
+            return jsonResponse({ error: 'Failed to create default admin' }, 500);
+          }
+        } catch (createError) {
+          console.error('Error creating default admin:', createError);
+          return jsonResponse({ error: 'Invalid credentials' }, 401);
+        }
+      } else {
+        return jsonResponse({ error: 'Invalid credentials' }, 401);
+      }
+    }
+
+    // 验证密码
+    const passwordValid = await verifyHash(password, admin.password_hash);
+    console.log('Password valid:', passwordValid);
+
+    if (!passwordValid) {
       return jsonResponse({ error: 'Invalid credentials' }, 401);
     }
 
