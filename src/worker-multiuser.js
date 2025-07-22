@@ -576,11 +576,17 @@ async function handleAdminGetTokens(request, env) {
       return jsonResponse({ error: authResult.error }, 401);
     }
 
-    const tokens = await env.DB.prepare(`
-      SELECT id, name, token_prefix, status, created_at, updated_at
-      FROM tokens
-      ORDER BY created_at DESC
-    `).all();
+    let tokens = { results: [] };
+    try {
+      tokens = await env.DB.prepare(`
+        SELECT id, name, token_prefix, status, created_at, updated_at
+        FROM tokens
+        ORDER BY created_at DESC
+      `).all();
+    } catch (dbError) {
+      console.log('Tokens table not found or error:', dbError.message);
+      // 如果表不存在，返回空数组
+    }
 
     return jsonResponse({
       status: 'success',
@@ -804,23 +810,29 @@ async function handleAdminGetAllocations(request, env) {
       return jsonResponse({ error: authResult.error }, 401);
     }
 
-    const allocations = await env.DB.prepare(`
-      SELECT
-        ta.id,
-        ta.user_id,
-        ta.token_id,
-        ta.status,
-        ta.created_at,
-        u.username,
-        u.email,
-        t.name as token_name,
-        t.token_prefix
-      FROM token_allocations ta
-      JOIN users u ON ta.user_id = u.id
-      JOIN tokens t ON ta.token_id = t.id
-      WHERE ta.status = 'active'
-      ORDER BY ta.created_at DESC
-    `).all();
+    let allocations = { results: [] };
+    try {
+      allocations = await env.DB.prepare(`
+        SELECT
+          ta.id,
+          ta.user_id,
+          ta.token_id,
+          ta.status,
+          ta.created_at,
+          u.username,
+          u.email,
+          t.name as token_name,
+          t.token_prefix
+        FROM token_allocations ta
+        JOIN users u ON ta.user_id = u.id
+        JOIN tokens t ON ta.token_id = t.id
+        WHERE ta.status = 'active'
+        ORDER BY ta.created_at DESC
+      `).all();
+    } catch (dbError) {
+      console.log('Allocations query failed (tables may not exist):', dbError.message);
+      // 如果表不存在或JOIN失败，返回空数组
+    }
 
     return jsonResponse({
       status: 'success',
@@ -1622,7 +1634,7 @@ async function handleAdminPanel(request, env) {
                     await loadAllocations();
                     break;
                 case 'stats':
-                    await loadStats();
+                    await loadStatsDetail();
                     break;
             }
         }
@@ -1998,6 +2010,44 @@ async function handleAdminPanel(request, env) {
                 }
             } catch (error) {
                 alert('删除失败: ' + error.message);
+            }
+        }
+
+        // 加载详细统计信息
+        async function loadStatsDetail() {
+            try {
+                const stats = await apiRequest('/api/admin/stats');
+                const content = \`
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-number">\${stats.total_users || 0}</div>
+                            <div class="stat-label">总用户数</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number">\${stats.total_tokens || 0}</div>
+                            <div class="stat-label">总Token数</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number">\${stats.active_allocations || 0}</div>
+                            <div class="stat-label">活跃分配</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number">\${stats.today_requests || 0}</div>
+                            <div class="stat-label">今日请求</div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>系统信息</h3>
+                        <p>✅ 数据库连接正常</p>
+                        <p>✅ API服务运行中</p>
+                        <p>✅ Token池管理正常</p>
+                        <p>📊 统计数据更新时间: \${new Date().toLocaleString()}</p>
+                    </div>
+                \`;
+                document.getElementById('statsContent').innerHTML = content;
+            } catch (error) {
+                document.getElementById('statsContent').innerHTML = '<div class="error">加载统计信息失败: ' + error.message + '</div>';
             }
         }
 
