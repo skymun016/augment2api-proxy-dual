@@ -24,7 +24,7 @@ ACCESS_PWD = "admin-password-123"
 # D1 数据库绑定
 [[d1_databases]]
 binding = "DB"
-database_name = "augment2api-multiuser"
+database_name = "augment"
 database_id = "1735318b-8db9-422e-8014-0457c9ecf70b"
 
 # 生产环境配置
