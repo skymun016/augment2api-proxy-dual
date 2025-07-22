@@ -480,6 +480,371 @@ async function handleAdminCreateAllocation(request, env) {
   }
 }
 
+// 处理管理员统计信息
+async function handleAdminStats(request, env) {
+  try {
+    // 验证管理员权限
+    const authResult = await verifyAdminAuth(request, env);
+    if (!authResult.success) {
+      return jsonResponse({ error: authResult.error }, 401);
+    }
+
+    // 获取统计数据
+    const [usersCount, tokensCount, allocationsCount] = await Promise.all([
+      env.DB.prepare('SELECT COUNT(*) as count FROM users').first(),
+      env.DB.prepare('SELECT COUNT(*) as count FROM tokens WHERE status = "active"').first(),
+      env.DB.prepare('SELECT COUNT(*) as count FROM token_allocations WHERE status = "active"').first()
+    ]);
+
+    // 获取今日请求数（如果有usage表的话）
+    let todayRequests = 0;
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const usage = await env.DB.prepare(`
+        SELECT COUNT(*) as count FROM usage_logs
+        WHERE DATE(created_at) = ?
+      `).bind(today).first();
+      todayRequests = usage?.count || 0;
+    } catch (error) {
+      // 如果usage_logs表不存在，忽略错误
+      console.log('Usage logs table not found, setting today_requests to 0');
+    }
+
+    return jsonResponse({
+      status: 'success',
+      total_users: usersCount?.count || 0,
+      total_tokens: tokensCount?.count || 0,
+      active_allocations: allocationsCount?.count || 0,
+      today_requests: todayRequests
+    });
+
+  } catch (error) {
+    console.error('Error in handleAdminStats:', error);
+    return jsonResponse({ error: 'Failed to get stats' }, 500);
+  }
+}
+
+// 处理管理员获取Token列表
+async function handleAdminGetTokens(request, env) {
+  try {
+    // 验证管理员权限
+    const authResult = await verifyAdminAuth(request, env);
+    if (!authResult.success) {
+      return jsonResponse({ error: authResult.error }, 401);
+    }
+
+    const tokens = await env.DB.prepare(`
+      SELECT id, name, token_prefix, status, created_at, updated_at
+      FROM tokens
+      ORDER BY created_at DESC
+    `).all();
+
+    return jsonResponse({
+      status: 'success',
+      tokens: tokens.results || []
+    });
+
+  } catch (error) {
+    console.error('Error in handleAdminGetTokens:', error);
+    return jsonResponse({ error: 'Failed to get tokens' }, 500);
+  }
+}
+
+// 处理管理员创建Token
+async function handleAdminCreateToken(request, env) {
+  try {
+    // 验证管理员权限
+    const authResult = await verifyAdminAuth(request, env);
+    if (!authResult.success) {
+      return jsonResponse({ error: authResult.error }, 401);
+    }
+
+    const { name, token } = await request.json();
+
+    if (!name || !token) {
+      return jsonResponse({ error: 'Missing name or token' }, 400);
+    }
+
+    // 验证token格式（应该是64位十六进制）
+    if (!/^[a-fA-F0-9]{64}$/.test(token)) {
+      return jsonResponse({ error: 'Invalid token format. Must be 64-character hex string.' }, 400);
+    }
+
+    // 检查token是否已存在
+    const existing = await env.DB.prepare(`
+      SELECT id FROM tokens WHERE token_hash = ?
+    `).bind(await generateHash(token)).first();
+
+    if (existing) {
+      return jsonResponse({ error: 'Token already exists' }, 400);
+    }
+
+    // 创建token
+    const tokenHash = await generateHash(token);
+    const tokenPrefix = token.substring(0, 8) + '...';
+
+    const result = await env.DB.prepare(`
+      INSERT INTO tokens (name, token_hash, token_prefix, status)
+      VALUES (?, ?, ?, 'active')
+    `).bind(name, tokenHash, tokenPrefix).run();
+
+    return jsonResponse({
+      status: 'success',
+      token_id: result.meta.last_row_id,
+      message: 'Token created successfully'
+    });
+
+  } catch (error) {
+    console.error('Error in handleAdminCreateToken:', error);
+    return jsonResponse({ error: 'Failed to create token' }, 500);
+  }
+}
+
+// 处理管理员创建分配
+async function handleAdminCreateAllocation(request, env) {
+  try {
+    // 验证管理员权限
+    const authResult = await verifyAdminAuth(request, env);
+    if (!authResult.success) {
+      return jsonResponse({ error: authResult.error }, 401);
+    }
+
+    const { user_id, token_id } = await request.json();
+
+    if (!user_id || !token_id) {
+      return jsonResponse({ error: 'Missing user_id or token_id' }, 400);
+    }
+
+    // 检查用户和token是否存在
+    const [user, token] = await Promise.all([
+      env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(user_id).first(),
+      env.DB.prepare('SELECT id FROM tokens WHERE id = ? AND status = "active"').bind(token_id).first()
+    ]);
+
+    if (!user) {
+      return jsonResponse({ error: 'User not found' }, 404);
+    }
+
+    if (!token) {
+      return jsonResponse({ error: 'Token not found or inactive' }, 404);
+    }
+
+    // 检查是否已经分配
+    const existing = await env.DB.prepare(`
+      SELECT id FROM token_allocations
+      WHERE user_id = ? AND token_id = ? AND status = 'active'
+    `).bind(user_id, token_id).first();
+
+    if (existing) {
+      return jsonResponse({ error: 'Token already allocated to this user' }, 400);
+    }
+
+    // 创建分配
+    const result = await env.DB.prepare(`
+      INSERT INTO token_allocations (user_id, token_id, status)
+      VALUES (?, ?, 'active')
+    `).bind(user_id, token_id).run();
+
+    return jsonResponse({
+      status: 'success',
+      allocation_id: result.meta.last_row_id,
+      message: 'Token allocated successfully'
+    });
+
+  } catch (error) {
+    console.error('Error in handleAdminCreateAllocation:', error);
+    return jsonResponse({ error: 'Failed to create allocation' }, 500);
+  }
+}
+
+// 处理管理员创建用户
+async function handleAdminCreateUser(request, env) {
+  try {
+    // 验证管理员权限
+    const authResult = await verifyAdminAuth(request, env);
+    if (!authResult.success) {
+      return jsonResponse({ error: authResult.error }, 401);
+    }
+
+    const { username, email, personal_token, token_quota = 3 } = await request.json();
+
+    if (!username || !email || !personal_token) {
+      return jsonResponse({ error: 'Missing required fields' }, 400);
+    }
+
+    // 验证personal_token格式
+    if (!/^[a-fA-F0-9]{64}$/.test(personal_token)) {
+      return jsonResponse({ error: 'Invalid personal_token format. Must be 64-character hex string.' }, 400);
+    }
+
+    // 检查用户名和邮箱是否已存在
+    const [existingUser, existingEmail] = await Promise.all([
+      env.DB.prepare('SELECT id FROM users WHERE username = ?').bind(username).first(),
+      env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first()
+    ]);
+
+    if (existingUser) {
+      return jsonResponse({ error: 'Username already exists' }, 400);
+    }
+
+    if (existingEmail) {
+      return jsonResponse({ error: 'Email already exists' }, 400);
+    }
+
+    // 创建用户
+    const personalTokenHash = await generateHash(personal_token);
+    const result = await env.DB.prepare(`
+      INSERT INTO users (username, email, personal_token_hash, token_quota, status)
+      VALUES (?, ?, ?, ?, 'active')
+    `).bind(username, email, personalTokenHash, token_quota).run();
+
+    return jsonResponse({
+      status: 'success',
+      user_id: result.meta.last_row_id,
+      message: 'User created successfully'
+    });
+
+  } catch (error) {
+    console.error('Error in handleAdminCreateUser:', error);
+    return jsonResponse({ error: 'Failed to create user' }, 500);
+  }
+}
+
+// 处理管理员更新用户
+async function handleAdminUpdateUser(request, env) {
+  try {
+    // 验证管理员权限
+    const authResult = await verifyAdminAuth(request, env);
+    if (!authResult.success) {
+      return jsonResponse({ error: authResult.error }, 401);
+    }
+
+    const url = new URL(request.url);
+    const userId = url.pathname.split('/').pop();
+    const { username, email, token_quota, status } = await request.json();
+
+    // 检查用户是否存在
+    const user = await env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(userId).first();
+    if (!user) {
+      return jsonResponse({ error: 'User not found' }, 404);
+    }
+
+    // 构建更新语句
+    const updates = [];
+    const values = [];
+
+    if (username) {
+      updates.push('username = ?');
+      values.push(username);
+    }
+    if (email) {
+      updates.push('email = ?');
+      values.push(email);
+    }
+    if (token_quota !== undefined) {
+      updates.push('token_quota = ?');
+      values.push(token_quota);
+    }
+    if (status) {
+      updates.push('status = ?');
+      values.push(status);
+    }
+
+    if (updates.length === 0) {
+      return jsonResponse({ error: 'No fields to update' }, 400);
+    }
+
+    values.push(userId);
+
+    await env.DB.prepare(`
+      UPDATE users SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(...values).run();
+
+    return jsonResponse({
+      status: 'success',
+      message: 'User updated successfully'
+    });
+
+  } catch (error) {
+    console.error('Error in handleAdminUpdateUser:', error);
+    return jsonResponse({ error: 'Failed to update user' }, 500);
+  }
+}
+
+// 处理管理员删除分配
+async function handleAdminDeleteAllocation(request, env) {
+  try {
+    // 验证管理员权限
+    const authResult = await verifyAdminAuth(request, env);
+    if (!authResult.success) {
+      return jsonResponse({ error: authResult.error }, 401);
+    }
+
+    const url = new URL(request.url);
+    const allocationId = url.pathname.split('/').pop();
+
+    // 检查分配是否存在
+    const allocation = await env.DB.prepare('SELECT id FROM token_allocations WHERE id = ?').bind(allocationId).first();
+    if (!allocation) {
+      return jsonResponse({ error: 'Allocation not found' }, 404);
+    }
+
+    // 删除分配（软删除）
+    await env.DB.prepare(`
+      UPDATE token_allocations SET status = 'deleted', updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(allocationId).run();
+
+    return jsonResponse({
+      status: 'success',
+      message: 'Allocation deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Error in handleAdminDeleteAllocation:', error);
+    return jsonResponse({ error: 'Failed to delete allocation' }, 500);
+  }
+}
+
+// 处理管理员获取分配列表
+async function handleAdminGetAllocations(request, env) {
+  try {
+    // 验证管理员权限
+    const authResult = await verifyAdminAuth(request, env);
+    if (!authResult.success) {
+      return jsonResponse({ error: authResult.error }, 401);
+    }
+
+    const allocations = await env.DB.prepare(`
+      SELECT
+        ta.id,
+        ta.user_id,
+        ta.token_id,
+        ta.status,
+        ta.created_at,
+        u.username,
+        u.email,
+        t.name as token_name,
+        t.token_prefix
+      FROM token_allocations ta
+      JOIN users u ON ta.user_id = u.id
+      JOIN tokens t ON ta.token_id = t.id
+      WHERE ta.status = 'active'
+      ORDER BY ta.created_at DESC
+    `).all();
+
+    return jsonResponse({
+      status: 'success',
+      allocations: allocations.results || []
+    });
+
+  } catch (error) {
+    console.error('Error in handleAdminGetAllocations:', error);
+    return jsonResponse({ error: 'Failed to get allocations' }, 500);
+  }
+}
+
 // ============ OpenAI兼容API处理函数 ============
 
 // 处理模型列表
@@ -548,6 +913,43 @@ async function handleChatCompletion(request, env) {
 }
 
 // ============ 辅助函数 ============
+
+// 验证管理员权限
+async function verifyAdminAuth(request, env) {
+  try {
+    const authHeader = request.headers.get('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return { success: false, error: 'Missing or invalid authorization header' };
+    }
+
+    const sessionToken = authHeader.substring(7);
+
+    // 查询会话
+    const session = await env.DB.prepare(`
+      SELECT s.*, a.username, a.role
+      FROM sessions s
+      JOIN admins a ON s.user_id = a.id
+      WHERE s.session_token = ? AND s.user_type = 'admin' AND s.expires_at > CURRENT_TIMESTAMP
+    `).bind(sessionToken).first();
+
+    if (!session) {
+      return { success: false, error: 'Invalid or expired session' };
+    }
+
+    return {
+      success: true,
+      admin: {
+        id: session.user_id,
+        username: session.username,
+        role: session.role
+      }
+    };
+
+  } catch (error) {
+    console.error('Error in verifyAdminAuth:', error);
+    return { success: false, error: 'Authentication failed' };
+  }
+}
 
 // 转发请求到Augment API
 async function forwardToAugment(token, requestBody, env) {
