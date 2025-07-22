@@ -510,15 +510,34 @@ async function handleAdminStats(request, env) {
       return jsonResponse({ error: authResult.error }, 401);
     }
 
-    // 获取统计数据
-    const [usersCount, tokensCount, allocationsCount] = await Promise.all([
-      env.DB.prepare('SELECT COUNT(*) as count FROM users').first(),
-      env.DB.prepare('SELECT COUNT(*) as count FROM tokens WHERE status = "active"').first(),
-      env.DB.prepare('SELECT COUNT(*) as count FROM token_allocations WHERE status = "active"').first()
-    ]);
+    // 获取统计数据，使用更安全的查询
+    let usersCount = 0;
+    let tokensCount = 0;
+    let allocationsCount = 0;
+    let todayRequests = 0;
+
+    try {
+      const users = await env.DB.prepare('SELECT COUNT(*) as count FROM users').first();
+      usersCount = users?.count || 0;
+    } catch (error) {
+      console.log('Users table not found or error:', error.message);
+    }
+
+    try {
+      const tokens = await env.DB.prepare('SELECT COUNT(*) as count FROM tokens WHERE status = "active"').first();
+      tokensCount = tokens?.count || 0;
+    } catch (error) {
+      console.log('Tokens table not found or error:', error.message);
+    }
+
+    try {
+      const allocations = await env.DB.prepare('SELECT COUNT(*) as count FROM token_allocations WHERE status = "active"').first();
+      allocationsCount = allocations?.count || 0;
+    } catch (error) {
+      console.log('Token_allocations table not found or error:', error.message);
+    }
 
     // 获取今日请求数（如果有usage表的话）
-    let todayRequests = 0;
     try {
       const today = new Date().toISOString().split('T')[0];
       const usage = await env.DB.prepare(`
@@ -533,15 +552,18 @@ async function handleAdminStats(request, env) {
 
     return jsonResponse({
       status: 'success',
-      total_users: usersCount?.count || 0,
-      total_tokens: tokensCount?.count || 0,
-      active_allocations: allocationsCount?.count || 0,
+      total_users: usersCount,
+      total_tokens: tokensCount,
+      active_allocations: allocationsCount,
       today_requests: todayRequests
     });
 
   } catch (error) {
     console.error('Error in handleAdminStats:', error);
-    return jsonResponse({ error: 'Failed to get stats' }, 500);
+    return jsonResponse({
+      error: 'Failed to get stats',
+      details: error.message
+    }, 500);
   }
 }
 
